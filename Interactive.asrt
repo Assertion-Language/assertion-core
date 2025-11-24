@@ -1,0 +1,21 @@
+PROJECT: The Vault
+
+THERE IS A Text called "Status" with value "Locked".
+THERE IS A Text called "PinCode" with value "1234".
+THERE IS A Text called "UserGuess" with value "".
+THERE IS A Number called "GoldBars" with value 0.
+
+WHEN "Login" is triggered:
+  - ASK "Enter the 4-digit PIN:" and STORE in "UserGuess".
+  - IF "UserGuess" IS "PinCode":
+      - OUTPUT "Access Granted."
+      - REPEAT 3 TIMES:
+          - SET "GoldBars" to "GoldBars" PLUS 1.
+          - OUTPUT "Dispensing Gold Bar..."
+      - OUTPUT "Total Gold Dispensed:".
+      - OUTPUT "GoldBars".
+  - IF "UserGuess" IS NOT "PinCode":
+      - OUTPUT "Access Denied. Security Alert Triggered."
+
+CONSTRAINT:
+  - "GoldBars" cannot be greater than 10.
