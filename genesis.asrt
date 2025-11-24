@@ -1,22 +1,17 @@
-PROJECT: The Creation Event
-
-THERE IS A Text called "State" with value "Void".
-THERE IS A Number called "LightPercentage" with value 0.
-
-WHEN "Ignition" is triggered:
-  - OUTPUT "The Architect speaks..."
-  - OUTPUT "Current State:"
-  - OUTPUT "State"
-  
-  - OUTPUT "Executing Creation Sequence..."
-  - SET "LightPercentage" to "LightPercentage" PLUS 100
-  
-  - OUTPUT "Light Level Reached:"
-  - OUTPUT "LightPercentage"
-  
-  - CREATE FILE "chronicles.txt"
-  - WRITE "Day 1: The Light was Good." TO FILE "chronicles.txt"
-  - OUTPUT "Event logged to chronicles.txt"
+THERE IS A number called "Score" with value "0"
+THERE IS A string called "Status" with value "Ready"
 
 CONSTRAINT:
-  - "LightPercentage" cannot be greater than 1000
+- "Score" cannot be greater than 100
+
+WHEN Ignition:
+  - OUTPUT "System Start..."
+  - SET "Score" to "10" PLUS "40"
+  - OUTPUT "Current Score:"
+  - OUTPUT "Score"
+  - IF "Score" IS "50":
+      - OUTPUT "Score is perfect."
+      - REPEAT 2 TIMES:
+          - OUTPUT "Bonus Round!"
+  - CREATE FILE "log.txt"
+  - WRITE "System Success" TO FILE "log.txt"
