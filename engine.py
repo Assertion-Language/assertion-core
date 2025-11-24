@@ -1,118 +1,186 @@
 import re
 import sys
 import time
+import os
 
 class AssertionEngine:
     def _init_(self):
         self.state = {}
         self.constraints = []
         self.triggers = {}
+        self.MAX_LOOP_SAFETY = 100
 
     def load_manifest(self, file_path):
         print(f"[*] READING MANIFEST: {file_path}...")
-        with open(file_path, 'r') as f:
-            content = f.read()
-        
-        # 1. PARSE VARIABLES (Now detects Numbers)
-        # Regex looks for: THERE IS A [Type] called "[Name]" with value [Value]
+        try:
+            with open(file_path, 'r') as f:
+                content = f.read()
+        except FileNotFoundError:
+            print(f"ERROR: Could not find {file_path}")
+            return
+
+        # 1. PARSE VARIABLES
         context_matches = re.findall(r"THERE IS A (.?) called \"(.?)\"(?: with value (.*?))?[\.\n]", content)
         for type_, name, value in context_matches:
-            clean_value = value.strip()
-            # Auto-convert numbers
-            try:
-                if "." in clean_value:
-                    final_value = float(clean_value)
-                else:
-                    final_value = int(clean_value)
-            except:
-                final_value = clean_value.replace('"', '') # It's a string
-            
-            self.state[name] = {"type": type_.strip(), "value": final_value}
-            print(f"    + CREATED: {name} = {final_value}")
+            val = value.strip().replace('"', '')
+            if val.replace('.', '', 1).isdigit():
+                val = float(val) if '.' in val else int(val)
+            self.state[name] = {"type": type_.strip(), "value": val}
 
         # 2. PARSE CONSTRAINTS
         constraint_section = re.search(r"CONSTRAINT:(.*?)(?:WHEN|THERE|$)", content, re.DOTALL)
         if constraint_section:
             rules = constraint_section.group(1).strip().split('\n')
             for rule in rules:
-                clean_rule = rule.strip().replace("- ", "")
-                if clean_rule:
-                    self.constraints.append(clean_rule)
+                if rule.strip().replace("- ", ""):
+                    self.constraints.append(rule.strip().replace("- ", ""))
 
         # 3. PARSE TRIGGERS
-        when_blocks = re.split(r"WHEN ", content)[1:]
-        for block in when_blocks:
-            lines = block.strip().split('\n')
-            trigger_name = lines[0].replace(":", "").strip()
-            actions = [line.strip().replace("- ", "") for line in lines[1:] if line.strip().startswith("-")]
-            self.triggers[trigger_name] = actions
+        raw_blocks = re.split(r"WHEN ", content)[1:]
+        for block in raw_blocks:
+            lines = block.split('\n')
+            trigger_name = lines[0].replace(":", "").strip().replace('"', '')
+            action_lines = [line for line in lines[1:] if line.strip()]
+            self.triggers[trigger_name] = action_lines
 
     def check_constraints(self):
-        """The Pre-Cognitive Engine: Math Safety."""
         for rule in self.constraints:
-            # Example Logic: "Cost" cannot be greater than "Revenue"
             if "cannot be greater than" in rule:
                 parts = rule.split(" cannot be greater than ")
-                var1 = parts[0].replace('"', '').strip()
-                var2 = parts[1].replace('"', '').strip()
-                
-                val1 = self.state.get(var1, {}).get("value", 0)
-                val2 = self.state.get(var2, {}).get("value", 0)
-                
-                if val1 > val2:
-                    print(f"    ! VIOLATION: {var1} ({val1}) > {var2} ({val2})")
+                var_name = parts[0].replace('"', '').strip()
+                limit = float(parts[1].strip())
+                current_val = self.state.get(var_name, {}).get("value", 0)
+                if current_val > limit:
+                    print(f"\n[!] CONSTRAINT VIOLATION: {var_name} ({current_val}) > {limit}")
                     return False
         return True
 
-    def perform_math(self, action):
-        """Parses natural language math into Python math."""
-        # Pattern: SET "Target" to "A" OP "B"
-        match = re.search(r"SET \"(.?)\" to \"(.?)\" (PLUS|MINUS|TIMES|DIVIDED BY) \"(.*?)\"", action)
-        if match:
-            target, var_a, op, var_b = match.groups()
-            val_a = self.state.get(var_a, {}).get("value", 0)
-            val_b = self.state.get(var_b, {}).get("value", 0)
-            
-            result = 0
-            if op == "PLUS": result = val_a + val_b
-            if op == "MINUS": result = val_a - val_b
-            if op == "TIMES": result = val_a * val_b
-            if op == "DIVIDED BY": 
-                if val_b == 0:
-                    print("    ! FATAL ERROR: Division by Zero detected.")
-                    return
-                result = val_a / val_b
-            
-            self.state[target]["value"] = result
-            print(f"      [CALCULATION]: {var_a} {op} {var_b} -> {result}")
-            return True
-        return False
+    def get_value(self, var_or_val):
+        clean = var_or_val.replace('"', '').strip()
+        if clean in self.state:
+            return self.state[clean]['value']
+        try:
+            if "." in clean: return float(clean)
+            return int(clean)
+        except:
+            return clean
 
-    def execute(self, trigger_event):
-        print(f"\n[*] TRIGGERING EVENT: {trigger_event}")
-        if not self.check_constraints():
-            print("    ! EXECUTION BLOCKED BY CONSTRAINT.")
-            return
+    def execute_block(self, lines, indent_level=0):
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip().replace("- ", "")
+            current_indent = len(line) - len(line.lstrip())
+            
+            if current_indent < indent_level: 
+                i += 1
+                continue
 
-        actions = self.triggers.get(trigger_event, [])
-        for action in actions:
-            # Check if it's Math
-            if "SET" in action:
-                self.perform_math(action)
-            # Check if it's Output
-            elif "OUTPUT" in action:
-                target = action.replace("OUTPUT", "").strip().replace('"', '')
-                # Is it a variable or string?
-                if target in self.state:
-                    print(f"      [DISPLAY]: {self.state[target]['value']}")
-                else:
-                    print(f"      [DISPLAY]: {target}")
+            # --- FILE I/O BLOCK ---
+            if stripped.startswith("CREATE FILE"):
+                filename = stripped.replace("CREATE FILE", "").strip().replace('"', '')
+                with open(filename, 'w') as f: f.write("")
+                print(f"    [DISK] Created file: {filename}")
+
+            elif "TO FILE" in stripped:
+                # WRITE "Text" TO FILE "file.txt"
+                # APPEND "Text" TO FILE "file.txt"
+                mode = 'a' if stripped.startswith("APPEND") else 'w'
+                parts = stripped.split(" TO FILE ")
+                content_raw = parts[0].replace("WRITE", "").replace("APPEND", "").strip()
+                filename = parts[1].strip().replace('"', '')
+                
+                content = str(self.get_value(content_raw))
+                with open(filename, mode) as f:
+                    if mode == 'a': f.write(content + "\n")
+                    else: f.write(content)
+                print(f"    [DISK] Wrote to {filename}")
+
+            elif stripped.startswith("READ FILE"):
+                # READ FILE "file.txt" INTO "Var"
+                match = re.search(r"READ FILE \"(.?)\" INTO \"(.?)\"", stripped)
+                if match:
+                    filename, var_target = match.groups()
+                    if os.path.exists(filename):
+                        with open(filename, 'r') as f:
+                            self.state[var_target]["value"] = f.read().strip()
+                        print(f"    [DISK] Read from {filename}")
+                    else:
+                        print(f"    [!] ERROR: File {filename} not found.")
+
+            # --- EXISTING LOGIC ---
+            elif stripped.startswith("ASK"):
+                match = re.search(r"ASK \"(.?)\" and STORE in \"(.?)\"", stripped)
+                if match:
+                    question, var_target = match.groups()
+                    user_input = input(f"    [INPUT] {question} ")
+                    self.state[var_target]["value"] = user_input
+
+            elif stripped.startswith("OUTPUT"):
+                target = stripped.replace("OUTPUT", "").strip()
+                print(f"    > {self.get_value(target)}")
+
+            elif stripped.startswith("SET"):
+                match = re.search(r"SET \"(.?)\" to \"(.?)\" (PLUS|MINUS|TIMES) (.*?)$", stripped)
+                if match:
+                    target, v1, op, v2 = match.groups()
+                    val1 = self.get_value(v1)
+                    val2 = self.get_value(v2)
+                    if op == "PLUS": result = val1 + val2
+                    elif op == "MINUS": result = val1 - val2
+                    elif op == "TIMES": result = val1 * val2
+                    self.state[target]["value"] = result
+                    if not self.check_constraints(): return False
+
+            elif stripped.startswith("IF"):
+                match = re.search(r"IF \"(.?)\" IS (NOT )?\"(.?)\":", stripped)
+                if match:
+                    var_name, is_not, check_val = match.groups()
+                    real_val = str(self.get_value(var_name))
+                    target_val = str(self.get_value(check_val))
+                    condition_met = (real_val == target_val)
+                    if is_not: condition_met = not condition_met
+
+                    if condition_met:
+                        sub_block = []
+                        j = i + 1
+                        while j < len(lines):
+                            if len(lines[j]) - len(lines[j].lstrip()) > current_indent:
+                                sub_block.append(lines[j])
+                                j += 1
+                            else: break
+                        self.execute_block(sub_block, indent_level + 2)
+                        i = j - 1
+
+            elif stripped.startswith("REPEAT"):
+                count = int(re.search(r"REPEAT (\d+) TIMES", stripped).group(1))
+                if count > self.MAX_LOOP_SAFETY: return
+                sub_block = []
+                j = i + 1
+                while j < len(lines):
+                    if len(lines[j]) - len(lines[j].lstrip()) > current_indent:
+                        sub_block.append(lines[j])
+                        j += 1
+                    else: break
+                for _ in range(count):
+                    self.execute_block(sub_block, indent_level + 2)
+                i = j - 1
+
+            i += 1
+        return True
+
+    def run(self, trigger):
+        print(f"\n[*] TRIGGER: {trigger}")
+        if trigger in self.triggers:
+            self.execute_block(self.triggers[trigger])
+        else:
+            print("Trigger not found.")
 
 if _name_ == "_main_":
     engine = AssertionEngine()
-    # Change this to "calculation.asrt" to test the math
-    try:
-        engine.load_manifest("calculation.asrt")
-        engine.execute("Audit")
-    except FileNotFoundError:
-        print("ERROR: Manifest file not found.")
+    # To test file I/O, create a file named 'io_test.asrt'
+    if len(sys.argv) > 1:
+        engine.load_manifest(sys.argv[1])
+        engine.run("Start")
+    else:
+        print("Usage: python engine.py [filename.asrt]")
