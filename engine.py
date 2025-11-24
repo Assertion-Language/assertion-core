@@ -1,326 +1,233 @@
-#engine.py
-
 import re
 import sys
 import os
-import traceback
+import time
+import hmac
+import hashlib
+from pathlib import Path
+from typing import List, Dict, Any
 
+# ============================================================
+# 1. LICENSE AUTHORITY (HMAC Protected)
+# ============================================================
+class LicenseAuthority:
+    SECRET = b"MOBIUS_ARCHITECT_ULTRAKEY_2025"
 
-class DSLRuntimeError(Exception):
-    """Custom error for DSL execution."""
-    pass
+    @staticmethod
+    def verify_key(raw: str):
+        try:
+            tier, ts, hwid, sig = raw.split("|")
+            message = f"{tier}:{ts}:{hwid}".encode()
+            expected = hmac.new(LicenseAuthority.SECRET, message, hashlib.sha256).hexdigest()
+            if sig != expected: return None
+            return {"tier": tier, "hwid": hwid}
+        except:
+            return None
 
+def get_hwid():
+    try:
+        if os.name == 'nt':
+            import subprocess
+            data = subprocess.check_output('wmic csproduct get uuid').decode().split('\n')[1].strip()
+        else:
+            data = f"{os.name}-{os.getlogin()}"
+    except:
+        data = "GENERIC_ID"
+    return hashlib.sha256(data.encode()).hexdigest()[:16]
 
+# ============================================================
+# 2. INDUSTRIAL PARSER (Tokenization)
+# ============================================================
+class Tokenizer:
+    def tokenize(self, text: str):
+        lines = text.split("\n")
+        tokens = []
+        for ln in lines:
+            if not ln.strip(): continue
+            indent = len(ln) - len(ln.lstrip())
+            tokens.append({"indent": indent, "raw": ln.strip()})
+        return tokens
+
+class Parser:
+    def parse(self, tokens):
+        ast = {}
+        current_trigger = None
+        buf = []
+        for t in tokens:
+            raw = t["raw"]
+            if raw.startswith("WHEN "):
+                if current_trigger: ast[current_trigger] = buf
+                buf = []
+                current_trigger = raw.replace("WHEN ", "").replace(":", "").strip()
+                continue
+            buf.append(t)
+        if current_trigger: ast[current_trigger] = buf
+        return ast
+
+# ============================================================
+# 3. VIRTUAL FILE SYSTEM (Sandboxed)
+# ============================================================
+class VFS:
+    ROOT = Path(".vfs")
+    @staticmethod
+    def init(): VFS.ROOT.mkdir(exist_ok=True)
+    @staticmethod
+    def write(name, content): (VFS.ROOT / name).write_text(str(content), encoding='utf-8')
+    @staticmethod
+    def read(name): 
+        p = VFS.ROOT / name
+        return p.read_text(encoding='utf-8') if p.exists() else None
+
+# ============================================================
+# 4. THE ENGINE (Balanced Logic)
+# ============================================================
 class AssertionEngine:
-    """
-    A full-featured, hardened DSL interpreter for the Assertion Language.
-    Includes strict parsing, safe regex handling, robust I/O, multi-trigger chaining,
-    and deterministic execution.
-    """
-
-    # ----------------------------
-    # INITIALIZATION
-    # ----------------------------
     def __init__(self, debug=False):
         self.state = {}
         self.constraints = []
         self.triggers = {}
-        self.debug_mode = debug
-        self.MAX_LOOP_SAFETY = 500
-        self.MAX_RECURSION_DEPTH = 50
-        self.call_depth = 0
+        
+        # --- THE BALANCED MODEL ---
+        # Free: 500 Loops, No Debug Logs. (Good for learning)
+        # Pro:  1,000,000 Loops, Full Debug Logs. (Good for business)
+        self.tier = "FREE"
+        self.limits = {"loop": 500, "recursion": 50, "debug": False}
+        
+        self._load_license()
 
-    # ----------------------------
-    # UTILITIES
-    # ----------------------------
+    def _load_license(self):
+        if os.path.exists("license.key"):
+            try:
+                key = open("license.key").read().strip()
+                data = LicenseAuthority.verify_key(key)
+                if data and data["hwid"] == get_hwid():
+                    self.tier = data["tier"]
+                    # UNLOCK GOD MODE
+                    if self.tier in ["PRO", "MAX"]:
+                        self.limits = {"loop": 1000000, "recursion": 2000, "debug": True}
+            except:
+                pass
+
     def log(self, msg):
-        if self.debug_mode:
-            print(f"[DEBUG] {msg}")
+        # PAYWALL: Only PRO users see the internal logic trace
+        if self.limits["debug"]:
+            print(f"    [DEBUG] {msg}")
 
-    # ----------------------------
-    # PARSER
-    # ----------------------------
-    def load_manifest(self, file_path):
-        print(f"[*] Loading Manifest: {file_path}")
-
-        if not os.path.exists(file_path):
-            raise DSLRuntimeError(f"Manifest '{file_path}' does not exist.")
-
-        content = open(file_path).read()
-
-        # -------- VARIABLES --------
-        pattern_var = re.compile(
-            r'THERE IS A ([^"]+?) called "([^"]+)"(?: with value ([^\.\n]+))?[\.\n]'
-        )
-
-        for type_, name, val in pattern_var.findall(content):
-            type_ = type_.strip()
-            val = val.strip().replace('"', '') if val else None
-
-            if val is None:
-                # Type-based defaulting
-                if any(t in type_.lower() for t in ("number", "integer", "float")):
-                    parsed = 0
-                else:
-                    parsed = ""
-            else:
-                # Strong numeric parsing
-                num = re.sub(r"\s+", "", val)
-                if num.replace(".", "", 1).lstrip("-").isdigit():
-                    parsed = float(num) if "." in num else int(num)
-                else:
-                    parsed = val
-
-            self.state[name] = {"type": type_, "value": parsed}
-
-        # -------- CONSTRAINTS --------
-        block = re.search(r"CONSTRAINT:(.*?)(?=WHEN|THERE|$)", content, re.DOTALL)
+    def load_manifest(self, path):
+        if not os.path.exists(path): return
+        txt = Path(path).read_text(encoding='utf-8')
+        
+        # 1. VARS
+        for ln in txt.split("\n"):
+            if "THERE IS A" in ln: 
+                m = re.search(r'THERE IS A (.*?) called "(.*?)"(?: with value (.*?))?[.\n]?', ln)
+                if m:
+                    t, n, v = m.groups()
+                    v = v.strip().replace('"', '') if v else "0"
+                    if v.replace('.','',1).isdigit(): v = float(v) if '.' in v else int(v)
+                    self.state[n] = {"type": t.strip(), "value": v}
+            
+        # 2. CONSTRAINTS
+        block = re.search(r"CONSTRAINT:(.*?)(?=WHEN|THERE|$)", txt, re.DOTALL)
         if block:
-            lines = block.group(1).strip().split("\n")
-            for ln in lines:
-                ln = ln.strip().replace("- ", "")
-                if ln:
-                    self.constraints.append(ln)
+            for ln in block.group(1).split("\n"):
+                if ln.strip(): self.constraints.append(ln.strip().replace("- ", ""))
 
-        # -------- TRIGGERS --------
-        split = re.split(r"\bWHEN\b", content)[1:]
+        # 3. TRIGGERS
+        tokens = Tokenizer().tokenize(txt)
+        self.triggers = Parser().parse(tokens)
 
-        for section in split:
-            lines = section.split("\n")
-            trigger_name = lines[0].replace(":", "").strip().replace('"', "")
-            actions = [l for l in lines[1:] if l.strip()]
-            self.triggers[trigger_name] = actions
+    def get(self, n):
+        n = str(n).strip().replace('"', '')
+        return self.state[n]["value"] if n in self.state else (float(n) if n.replace('.','',1).isdigit() else n)
 
-    # ----------------------------
-    # STATE HELPERS
-    # ----------------------------
-    def get_value(self, raw):
-        raw = raw.strip().replace('"', '')
-        if raw in self.state:
-            return self.state[raw]["value"]
-        try:
-            return int(raw) if raw.isdigit() else float(raw)
-        except:
-            return raw
+    def set(self, n, v):
+        self.state[n]["value"] = v
+        if not self.check_constraints():
+            print("[!] CRITICAL: REALITY CONSTRAINT BROKEN")
+            sys.exit(1)
 
-    def set_value(self, key, value):
-        if key not in self.state:
-            raise DSLRuntimeError(f"Variable '{key}' does not exist.")
-        self.state[key]["value"] = value
-
-    # ----------------------------
-    # CONSTRAINT CHECKING
-    # ----------------------------
     def check_constraints(self):
-        for rule in self.constraints:
-            if "cannot be greater than" in rule:
-                var, limit = rule.split(" cannot be greater than ")
-                var = var.replace('"', '').strip()
-                limit = float(limit.strip())
-                val = self.state[var]["value"]
-                if val > limit:
-                    print(f"\n[!] CONSTRAINT VIOLATION: {var} ({val}) > {limit}")
-                    return False
+        for r in self.constraints:
+            if "cannot be greater than" in r:
+                v, l = r.split(" cannot be greater than ")
+                if self.get(v.strip().strip('"')) > float(l): return False
         return True
 
-    # ----------------------------
-    # BLOCK EXECUTION
-    # ----------------------------
-    def execute_block(self, lines, indent=0):
+    def execute_block(self, tokens, indent=0):
         i = 0
-        L = len(lines)
-
-        while i < L:
-            line = lines[i]
-            stripped = line.strip()
-            current_indent = len(line) - len(line.lstrip())
-
-            # Skip unrelated blocks
-            if current_indent < indent:
+        while i < len(tokens):
+            t = tokens[i]
+            raw, curr = t["raw"], t["indent"]
+            if curr < indent: 
                 i += 1
                 continue
+            
+            self.log(f"Exec: {raw}") 
 
-            self.log(f"Line: {stripped}")
-
-            # ========== CREATE FILE ==========
-            if stripped.startswith("CREATE FILE"):
-                fname = stripped.replace("CREATE FILE", "").strip().strip('"')
-                open(fname, "w").close()
-                print(f"    [DISK] Created: {fname}")
+            if raw.startswith("OUTPUT"):
+                print(f"    > {self.get(raw.replace('OUTPUT','').strip())}")
                 i += 1
-                continue
 
-            # ========== WRITE / APPEND ==========
-            if "TO FILE" in stripped and (stripped.startswith("WRITE") or stripped.startswith("APPEND")):
-                mode = "a" if stripped.startswith("APPEND") else "w"
-                left, fname = stripped.split(" TO FILE ")
-                fname = fname.strip().strip('"')
-                content_raw = left.replace("WRITE", "").replace("APPEND", "").strip()
-                content = str(self.get_value(content_raw))
-                with open(fname, mode) as f:
-                    if mode == "a":
-                        f.write(content + "\n")
-                    else:
-                        f.write(content)
-                print(f"    [DISK] Wrote to: {fname}")
-                i += 1
-                continue
-
-            # ========== READ FILE ==========
-            if stripped.startswith("READ FILE"):
-                m = re.search(r'READ FILE "([^"]+)" INTO "([^"]+)"', stripped)
-                if not m:
-                    raise DSLRuntimeError(f"Malformed READ FILE syntax: {stripped}")
-                fname, target = m.groups()
-                if not os.path.exists(fname):
-                    print(f"    [!] File not found: {fname}")
-                else:
-                    self.state[target]["value"] = open(fname).read().strip()
-                    print(f"    [DISK] Read from: {fname}")
-                i += 1
-                continue
-
-            # ========== ASK ==========
-            if stripped.startswith("ASK"):
-                m = re.search(r'ASK "([^"]+)" and STORE in "([^"]+)"', stripped)
-                if not m:
-                    raise DSLRuntimeError(f"Malformed ASK syntax: {stripped}")
-                q, target = m.groups()
-                ans = input(f"    [INPUT] {q} ")
-                self.set_value(target, ans)
-                i += 1
-                continue
-
-            # ========== OUTPUT ==========
-            if stripped.startswith("OUTPUT"):
-                target = stripped.replace("OUTPUT", "").strip()
-                print(f"    > {self.get_value(target)}")
-                i += 1
-                continue
-
-            # ========== SET ==========
-            if stripped.startswith("SET"):
-                # Math form
-                m = re.search(r'SET\s+"([^"]+)"\s+to\s+"([^"]+)"\s+(PLUS|MINUS|TIMES)\s+"([^"]+)"', stripped)
+            elif raw.startswith("SET"):
+                m = re.search(r'SET "(.*?)" to "(.*?)" (PLUS|MINUS) "(.*?)"', raw)
                 if m:
-                    target, a, op, b = m.groups()
-                    A, B = self.get_value(a), self.get_value(b)
-                    if op == "PLUS": result = A + B
-                    elif op == "MINUS": result = A - B
-                    else: result = A * B
-                    self.set_value(target, result)
-                    if not self.check_constraints():
-                        return False
-                    i += 1
-                    continue
-
-                # Simple form
-                m = re.search(r'SET\s+"([^"]+)"\s+to\s+(.+)', stripped)
-                if m:
-                    target, value = m.groups()
-                    self.set_value(target, self.get_value(value))
-                    if not self.check_constraints():
-                        return False
-                    i += 1
-                    continue
-
-                raise DSLRuntimeError(f"Malformed SET syntax: {stripped}")
-
-            # ========== IF ==========
-            if stripped.startswith("IF"):
-                m = re.search(r'IF\s+"([^"]+)"\s+IS\s+(NOT\s+)?\s*"([^"]+)"\s*:', stripped)
-                if not m:
-                    raise DSLRuntimeError(f"Malformed IF syntax: {stripped}")
-                var, neg, cmp_val = m.groups()
-                real = str(self.get_value(var))
-                cmp_val = str(self.get_value(cmp_val))
-                condition = (real == cmp_val)
-                if neg:
-                    condition = not condition
-
-                # Collect nested lines
-                block = []
-                j = i + 1
-                while j < L:
-                    next_indent = len(lines[j]) - len(lines[j].lstrip())
-                    if next_indent > current_indent:
-                        block.append(lines[j])
-                    else:
-                        break
-                    j += 1
-
-                if condition:
-                    self.log("IF branch TRUE")
-                    if not self.execute_block(block, indent=current_indent + 1):
-                        return False
+                    tgt, a, op, b = m.groups()
+                    v1 = self.get(a); v2 = self.get(b)
+                    res = v1 + v2 if op == "PLUS" else v1 - v2
+                    self.set(tgt, res)
                 else:
-                    self.log("IF branch FALSE")
+                    m2 = re.search(r'SET "(.*?)" to "(.*?)"', raw)
+                    if m2: self.set(m2.group(1), self.get(m2.group(2)))
+                i += 1
+            
+            elif raw.startswith("REPEAT"):
+                m = re.search(r"REPEAT (\d+) TIMES", raw)
+                count = int(m.group(1)) if m else 0
+                
+                # THE SOFT CAP (Fame vs Money)
+                if count > self.limits["loop"]:
+                    print(f"    [!] FREE TIER LIMIT: Capped at {self.limits['loop']} loops.")
+                    count = self.limits["loop"]
 
-                i = j
-                continue
-
-            # ========== REPEAT ==========
-            if stripped.startswith("REPEAT"):
-                m = re.search(r"REPEAT\s+(\d+)\s+TIMES", stripped)
-                if not m:
-                    raise DSLRuntimeError(f"Malformed REPEAT syntax: {stripped}")
-                count = int(m.group(1))
-
-                if count > self.MAX_LOOP_SAFETY:
-                    print(f"[!] Loop safety triggered ({count}), skipping loop.")
-                    count = 0
-
-                # Collect nested block
-                block = []
+                sub = []
                 j = i + 1
-                while j < L:
-                    next_indent = len(lines[j]) - len(lines[j].lstrip())
-                    if next_indent > current_indent:
-                        block.append(lines[j])
-                    else:
-                        break
-                    j += 1
-
-                for _ in range(count):
-                    if not self.execute_block(block, indent=current_indent + 1):
-                        break
-
+                while j < len(tokens):
+                    if tokens[j]["indent"] > curr: sub.append(tokens[j]); j += 1
+                    else: break
+                
+                for _ in range(count): self.execute_block(sub, indent + 2)
                 i = j
-                continue
+            
+            elif raw.startswith("IF"):
+                m = re.search(r'IF "(.*?)" IS "(.*?)"', raw)
+                cond = False
+                if m: cond = str(self.get(m.group(1))) == str(self.get(m.group(2)))
+                
+                sub = []
+                j = i + 1
+                while j < len(tokens):
+                    if tokens[j]["indent"] > curr: sub.append(tokens[j]); j += 1
+                    else: break
+                if cond: self.execute_block(sub, indent + 2)
+                i = j
+            
+            elif raw.startswith("CREATE") or "TO FILE" in raw:
+                if "WRITE" in raw: 
+                    parts = raw.split(" TO FILE ")
+                    VFS.write(parts[1].strip().replace('"',''), self.get(parts[0].replace("WRITE","").strip()))
+                    self.log("Disk Write Success")
+                i += 1
+            else: i += 1
 
-            raise DSLRuntimeError(f"Unknown instruction: {stripped}")
+    def run(self, trig):
+        if trig in self.triggers: self.execute_block(self.triggers[trig])
 
-        return True
-
-    # ----------------------------
-    # TRIGGER EXECUTION
-    # ----------------------------
-    def run(self, trigger):
-        if trigger.startswith("WHEN_CALL"):
-            trigger = trigger.replace("WHEN_CALL", "").strip().strip('"')
-
-        if trigger not in self.triggers:
-            raise DSLRuntimeError(f"Trigger '{trigger}' not found.")
-
-        print(f"\n[*] Trigger: {trigger}")
-
-        if self.call_depth > self.MAX_RECURSION_DEPTH:
-            raise DSLRuntimeError("Max trigger recursion depth exceeded.")
-
-        self.call_depth += 1
-        try:
-            ok = self.execute_block(self.triggers[trigger])
-            if not ok:
-                print("Execution halted due to constraint violation.")
-        finally:
-            self.call_depth -= 1
-
-
-# ---------------------------------------
-# CLI ENTRY
-# ---------------------------------------
 if __name__ == "__main__":
-    engine = AssertionEngine(debug=False)
+    VFS.init()
+    engine = AssertionEngine()
     if len(sys.argv) > 1:
         engine.load_manifest(sys.argv[1])
         engine.run("Ignition")
+    else:
+        print("Usage: python engine.py <file.asrt>")
