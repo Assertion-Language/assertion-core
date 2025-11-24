@@ -1,0 +1,22 @@
+PROJECT: The Creation Event
+
+THERE IS A Text called "State" with value "Void".
+THERE IS A Number called "LightPercentage" with value 0.
+
+WHEN "Ignition" is triggered:
+  - OUTPUT "The Architect speaks..."
+  - OUTPUT "Current State:"
+  - OUTPUT "State"
+  
+  - OUTPUT "Executing Creation Sequence..."
+  - SET "LightPercentage" to "LightPercentage" PLUS 100
+  
+  - OUTPUT "Light Level Reached:"
+  - OUTPUT "LightPercentage"
+  
+  - CREATE FILE "chronicles.txt"
+  - WRITE "Day 1: The Light was Good." TO FILE "chronicles.txt"
+  - OUTPUT "Event logged to chronicles.txt"
+
+CONSTRAINT:
+  - "LightPercentage" cannot be greater than 1000
