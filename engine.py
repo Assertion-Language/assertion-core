@@ -3,7 +3,7 @@ import sys
 import os
 
 class AssertionEngine:
-    def _init_(self):
+    def __init__(self):
         self.state = {}
         self.constraints = []
         self.triggers = {}
@@ -19,7 +19,7 @@ class AssertionEngine:
             return
 
         # 1. PARSE VARIABLES
-        context_matches = re.findall(r"THERE IS A (.?) called \"(.?)\"(?: with value (.*?))?[\.\n]", content)
+        context_matches = re.findall(r"THERE IS A (.*?) called \"(.*?)\"(?: with value (.*?))?[\.\n]", content)
         for type_, name, value in context_matches:
             type_ = type_.strip()
             if value:
@@ -108,7 +108,7 @@ class AssertionEngine:
                 i += 1 
 
             elif stripped.startswith("READ FILE"):
-                match = re.search(r"READ FILE \"(.?)\" INTO \"(.?)\"", stripped)
+                match = re.search(r"READ FILE \"(.*?)\" INTO \"(.*?)\"", stripped)
                 if match:
                     filename, var_target = match.groups()
                     if os.path.exists(filename):
@@ -121,7 +121,7 @@ class AssertionEngine:
 
             # --- EXISTING LOGIC ---
             elif stripped.startswith("ASK"):
-                match = re.search(r"ASK \"(.?)\" and STORE in \"(.?)\"", stripped)
+                match = re.search(r"ASK \"(.*?)\" and STORE in \"(.*?)\"", stripped)
                 if match:
                     question, var_target = match.groups()
                     user_input = input(f"    [INPUT] {question} ")
@@ -134,7 +134,7 @@ class AssertionEngine:
                 i += 1 
 
             elif stripped.startswith("SET"):
-                arith_match = re.search(r"SET\s+\"(.?)\"\s+to\s+\"(.?)\"\s+(PLUS|MINUS|TIMES)\s+(.*)", stripped)
+                arith_match = re.search(r"SET\s+\"(.*?)\"\s+to\s+\"(.*?)\"\s+(PLUS|MINUS|TIMES)\s+(.*)", stripped)
                 if arith_match:
                     target, v1, op, v2 = arith_match.groups()
                     val1 = self.get_value(v1)
@@ -145,7 +145,7 @@ class AssertionEngine:
                     self.state[target]["value"] = result
                     if not self.check_constraints(): return False
                 else:
-                    simple_match = re.search(r'SET\s+\"(.?)\"\s+to\s+(.)', stripped)
+                    simple_match = re.search(r'SET\s+\"(.*?)\"\s+to\s+(.*)', stripped)
                     if simple_match:
                         target, v = simple_match.groups()
                         self.state[target]["value"] = self.get_value(v)
@@ -153,7 +153,7 @@ class AssertionEngine:
                 i += 1 
 
             elif stripped.startswith("IF"):
-                match = re.search(r'IF\s+"(.?)"\s+IS\s+(NOT\s+)?\s+"([^"])"\s*:', stripped)
+                match = re.search(r'IF\s+"(.*?)"\s+IS\s+(NOT\s+)?\s+"([^"]*)"\s*:', stripped)
                 condition_met = False
                 if match:
                     var_name, is_not, check_val = match.groups()
@@ -196,8 +196,8 @@ class AssertionEngine:
                     else: break
                 
                 for _ in range(count):
-                    if not self.execute_block(sub_block, indent_level=current_indent + 1) is False:
-                         pass
+                    if not self.execute_block(sub_block, indent_level=current_indent + 1):
+                        break
                 i = j 
 
             else:
@@ -213,7 +213,7 @@ class AssertionEngine:
         else:
             print("Trigger not found.")
 
-if _name_ == "_main_":
+if __name__ == "__main__":
     engine = AssertionEngine()
     if len(sys.argv) > 1:
         engine.load_manifest(sys.argv[1])
