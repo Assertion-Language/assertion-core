@@ -1,0 +1,15 @@
+PROJECT: The Universal Ledger
+
+THERE IS A Number called "Revenue" with value 1000.
+THERE IS A Number called "Cost" with value 400.
+THERE IS A Number called "Profit" with value 0.
+THERE IS A Number called "TaxRate" with value 0.1.
+
+WHEN "Audit" is triggered:
+  - SET "Profit" to "Revenue" MINUS "Cost".
+  - SET "Tax" to "Profit" TIMES "TaxRate".
+  - OUTPUT "The Net Profit is:".
+  - OUTPUT "Profit".
+
+CONSTRAINT:
+  - "Cost" cannot be greater than "Revenue".
