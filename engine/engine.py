@@ -11,6 +11,7 @@ from engine.crypto.manifest_crypto import verify_manifest_signature
 
 class Engine:
     """
+
     The orchestration layer.
     This does NOT contain parsing/IR/runtime logic.
     It delegates to the modular subsystems.
