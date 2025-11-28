@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Assertion Engine — Distributed Dashboard</title>
+<style>
+    body { margin:0; font-family: monospace; background:#111; color:#eee; }
+    #topbar {
+        background:#222; padding:10px; font-size:18px; 
+        border-bottom:1px solid #444;
+        display:flex; justify-content:space-between;
+    }
+    #container {
+        display:flex; height:calc(100vh - 50px);
+    }
+    #sidebar {
+        width:250px; background:#181818; border-right:1px solid #333; overflow:auto;
+    }
+    #sidebar button {
+        width:100%; padding:10px; background:#202020; border:none;
+        color:#eee; text-align:left; cursor:pointer; border-bottom:1px solid #333;
+    }
+    #sidebar button:hover { background:#333; }
+    #main {
+        flex:1; padding:10px; overflow:auto; background:#111;
+    }
+    .panel { margin-bottom:20px; }
+    .panel h2 { border-bottom:1px solid #333; padding-bottom:5px; }
+    pre { background:#000; padding:10px; border:1px solid #333; overflow-x:auto;}
+    textarea, input { width:100%; background:#222; color:#eee; border:1px solid #444; padding:5px; }
+</style>
+</head>
+<body>
+
+<div id="topbar">
+    <div>🔥 Assertion Engine — Distributed Dashboard</div>
+    <div>
+        Node: <input id="nodePort" value="9000" style="width:80px;">
+        <button onclick="connectWS()">Connect</button>
+    </div>
+</div>
+
+<div id="container">
+    <div id="sidebar">
+        <button onclick="showPanel('cluster')">Cluster Info</button>
+        <button onclick="showPanel('raft')">RAFT Status</button>
+        <button onclick="showPanel('members')">Cluster Members</button>
+        <button onclick="showPanel('events')">Event Stream</button>
+        <button onclick="showPanel('debug')">Debugger</button>
+        <button onclick="showPanel('kv')">KV Store</button>
+        <button onclick="showPanel('manifest')">Manifest DB</button>
+        <button onclick="showPanel('exec')">Execution</button>
+        <button onclick="showPanel('workflow')">Workflow Submit</button>
+    </div>
+
+    <div id="main"></div>
+</div>
+
+<script>
+let ws = null;
+let eventLines = [];
+
+function api(path, method='GET', body=null) {
+    const port = document.getElementById("nodePort").value;
+    return fetch(`http://localhost:${port}${path}`, {
+        method,
+        headers: {"Content-Type": "application/json"},
+        body: body ? JSON.stringify(body) : null
+    }).then(r=>r.json());
+}
+
+function connectWS() {
+    const port = document.getElementById("nodePort").value;
+    ws = new WebSocket(`ws://localhost:${port}/ws/events`);
+    ws.onmessage = (ev)=>{
+        eventLines.push(ev.data);
+        if (eventLines.length>200) eventLines.shift();
+        if (currentPanel==='events') renderEvents();
+    }
+}
+
+let currentPanel = null;
+
+function showPanel(name) {
+    currentPanel = name;
+    {
+        cluster:
+        renderCluster,
+        raft:
+        renderRaft,
+        members:
+        renderMembers,
+        events:
+        renderEvents,
+        debug:
+        renderDebug,
+        kv:
+        renderKV,
+        manifest:
+        renderManifest,
+        exec:
+        renderExec,
+        workflow:
+        renderWorkflow
+    }[name]();
+}
+
+/* Panels */
+
+function renderCluster() {
+    api("/cluster/info").then(data=>{
+        document.getElementById("main").innerHTML =
+        `<div class='panel'><h2>Cluster Info</h2><pre>${JSON.stringify(data,null,2)}</pre></div>`;
+    });
+}
+
+function renderRaft() {
+    api("/raft/status").then(data=>{
+        document.getElementById("main").innerHTML =
+        `<div class='panel'><h2>RAFT Status</h2><pre>${JSON.stringify(data,null,2)}</pre></div>`;
+    });
+}
+
+function renderMembers() {
+    api("/cluster/members").then(data=>{
+        document.getElementById("main").innerHTML =
+        `<div class='panel'><h2>Cluster Members</h2><pre>${JSON.stringify(data,null,2)}</pre></div>`;
+    });
+}
+
+function renderEvents() {
+    document.getElementById("main").innerHTML =
+    `<div class='panel'><h2>Event Stream</h2><pre>${eventLines.join("\n")}</pre></div>`;
+}
+
+function renderDebug() {
+    api("/debug/state").then(data=>{
+        document.getElementById("main").innerHTML =
+        `<div class='panel'><h2>Debugger</h2>
+            <button onclick="api('/debug/pause','POST')">Pause</button>
+            <button onclick="api('/debug/resume','POST')">Resume</button>
+            <h3>State</h3><pre>${JSON.stringify(data,null,2)}</pre>
+            <h3>Eval Expression</h3>
+            <input id="dbgExpr" placeholder="x + y">
+            <button onclick="doEval()">Run</button>
+            <pre id='evalOut'></pre>
+        </div>`;
+    });
+}
+
+function doEval() {
+    const expr = document.getElementById("dbgExpr").value;
+    api("/debug/eval","POST",{expr}).then(d=>{
+        document.getElementById("evalOut").textContent = JSON.stringify(d,null,2);
+    });
+}
+
+function renderKV() {
+    document.getElementById("main").innerHTML =
+    `<div class='panel'>
+        <h2>KV Store</h2>
+        <input id="kvKey" placeholder="key">
+        <button onclick="kvGet()">Get</button>
+        <button onclick="kvPut()">Put</button>
+        <h3>Result</h3>
+        <pre id="kvOut"></pre>
+    </div>`;
+}
+
+function kvGet() {
+    const key = document.getElementById("kvKey").value;
+    api(`/kv/${key}`).then(d=> document.getElementById("kvOut").textContent = JSON.stringify(d,null,2));
+}
+function kvPut() {
+    const key = document.getElementById("kvKey").value;
+    const val = prompt("JSON value:");
+    api(`/kv/${key}`,"POST",JSON.parse(val)).then(d=>{
+        document.getElementById("kvOut").textContent = JSON.stringify(d,null,2);
+    });
+}
+
+function renderManifest() {
+    document.getElementById("main").innerHTML =
+    `<div class='panel'>
+        <h2>Manifest DB</h2>
+        <input id="manKey" placeholder="key">
+        <button onclick="manGet()">Get</button>
+        <button onclick="manSet()">Set</button>
+        <h3>Result</h3>
+        <pre id="manOut"></pre>
+    </div>`;
+}
+
+function manGet() {
+    const key = document.getElementById("manKey").value;
+    api(`/manifest/${key}`).then(d=> document.getElementById("manOut").textContent = JSON.stringify(d,null,2));
+}
+function manSet() {
+    const key = document.getElementById("manKey").value;
+    const val = prompt("JSON value:");
+    api(`/manifest/${key}`,"POST",JSON.parse(val)).then(d=>{
+        document.getElementById("manOut").textContent = JSON.stringify(d,null,2);
+    });
+}
+
+function renderExec() {
+    document.getElementById("main").innerHTML =
+    `<div class='panel'>
+        <h2>Execution</h2>
+        <h3>VM</h3>
+        <textarea id="vmCode"></textarea>
+        <button onclick="doVM()">Run</button>
+        <h3>JIT (IR)</h3>
+        <textarea id="jitIR"></textarea>
+        <button onclick="doJIT()">Run</button>
+        <h3>WASM</h3>
+        <input type="file" id="wasmFile">
+        <button onclick="doWASM()">Run</button>
+        <pre id="execOut"></pre>
+    </div>`;
+}
+
+function doVM() {
+    const code = document.getElementById("vmCode").value;
+    api("/execute/vm","POST",{code}).then(d=>{
+        document.getElementById("execOut").textContent = JSON.stringify(d,null,2);
+    });
+}
+function doJIT() {
+    const ir = JSON.parse(document.getElementById("jitIR").value);
+    api("/execute/jit","POST",ir).then(d=>{
+        document.getElementById("execOut").textContent = JSON.stringify(d,null,2);
+    });
+}
+function doWASM() {
+    const file = document.getElementById("wasmFile").files[0];
+    const port = document.getElementById("nodePort").value;
+    let r = new FileReader();
+    r.onload = () => {
+        fetch(`http://localhost:${port}/execute/wasm`, {
+            method: "POST",
+            body: r.result
+        }).then(r=>r.json()).then(d=>{
+            document.getElementById("execOut").textContent = JSON.stringify(d,null,2);
+        });
+    };
+    r.readAsArrayBuffer(file);
+}
+
+function renderWorkflow() {
+    document.getElementById("main").innerHTML =
+    `<div class='panel'>
+        <h2>Workflow Submission</h2>
+        <textarea id="workflowDAG" placeholder='{"nodes":[...],"edges":[...]}'></textarea>
+        <button onclick="submitWF()">Submit</button>
+        <pre id="wfOut"></pre>
+    </div>`;
+}
+
+function submitWF() {
+    const dag = JSON.parse(document.getElementById("workflowDAG").value);
+    api("/workflow/submit","POST",dag).then(d=>{
+        document.getElementById("wfOut").textContent = JSON.stringify(d,null,2);
+    });
+}
+</script>
+
+</body>
+</html>
