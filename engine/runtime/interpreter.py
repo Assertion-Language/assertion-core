@@ -17,20 +17,25 @@ from engine.parser.ast_nodes import (
 )
 from engine.capabilities.function_manager import FunctionManager
 from engine.capabilities.math_engine import MathEngine
-from engine.security.license import LicenseManager
+from engine.security.license import LicenseManager, Tier
 
 class Interpreter:
     def __init__(self):
         # SECURITY CHECK
-        # Must run before anything else happens
-        LicenseManager().validate_license()
+        self.tier = LicenseManager().validate_license()
         
         self.state = {}
-        self.out_stream = [] # Capture output for testing/debugging
+        self.out_stream = [] 
         self.brain = FunctionManager()
         self.math = MathEngine()
-        self.listeners = [] # (kind, target, val, body)
+        self.listeners = [] 
         self.server = None
+
+    def check_pro(self, feature_name: str):
+        if self.tier != Tier.PRO:
+            print(f"    [LOCKED] Feature '{feature_name}' is PRO only.")
+            raise PermissionError(f"Upgrade to use {feature_name}")
+
 
     async def run(self, program: Program, entry_point="Ignition"):
         # 0. Learn Skills
@@ -173,6 +178,7 @@ class Interpreter:
 
     def visit_SaveStmt(self, node: SaveStmt):
         try:
+            self.check_pro("Persistence (Save)")
             with open(node.filename, 'w') as f:
                 json.dump(self.state, f, indent=2)
             print(f"    [DISK] State saved to {node.filename}")
@@ -181,6 +187,7 @@ class Interpreter:
 
     def visit_LoadStmt(self, node: LoadStmt):
         try:
+            self.check_pro("Persistence (Load)")
             with open(node.filename, 'r') as f:
                 new_state = json.load(f)
                 self.state.update(new_state)
@@ -189,6 +196,7 @@ class Interpreter:
             print(f"    [ERR] Load failed: {e}")
 
     def visit_PythonStmt(self, node: PythonStmt):
+        self.check_pro("Python FFI")
         print("    [PYTHON] Executing raw code...")
         try:
             env = {"state": self.state}
@@ -197,6 +205,7 @@ class Interpreter:
             print(f"    [ERR] Python Error: {e}")
 
     def visit_ShellStmt(self, node: ShellStmt):
+        self.check_pro("Shell Integration")
         import subprocess
         print(f"    [SHELL] {node.command}")
         try:
@@ -235,6 +244,7 @@ class Interpreter:
         print(f"    [EVENT] Listening for {node.kind} on {node.target}")
 
     async def visit_StartServerStmt(self, node: StartServerStmt):
+        self.check_pro("Networking (Server)")
         async def handle(reader, writer):
             data = await reader.read(100)
             message = data.decode()

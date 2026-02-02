@@ -3,6 +3,11 @@ import hashlib
 import hmac
 import os
 import sys
+from enum import Enum
+
+class Tier(Enum):
+    FREE = "Free"
+    PRO = "Pro"
 
 class LicenseManager:
     def __init__(self, secret_key: str = "super_secret_master_key_v1"):
@@ -26,16 +31,16 @@ class LicenseManager:
 
     def generate_license(self, machine_id: str) -> str:
         """
-        Generates a valid license key for a given machine ID.
-        (Used by the vendor - US - to enable a client)
+        Generates a valid PRO license key for a given machine ID.
         """
         # HMAC-SHA256(Secret, MachineID)
         return hmac.new(self.secret_key, machine_id.encode(), hashlib.sha256).hexdigest()
 
-    def validate_license(self):
+    def validate_license(self) -> Tier:
         """
-        Checks if the current environment has a valid license.
-        Refuses to run if invalid.
+        Checks for license.key. 
+        Returns Tier.PRO if valid.
+        Returns Tier.FREE if missing/invalid.
         """
         mid = self.get_machine_id()
         expected = self.generate_license(mid)
@@ -43,22 +48,22 @@ class LicenseManager:
         # Look for license.key file
         if not os.path.exists("license.key"):
             print("==================================================")
-            print(" [ERROR] NO LICENSE FOUND")
-            print(" This software is protected.")
-            print(f" Your Machine ID: {mid}")
-            print(" Please purchase a license to continue.")
+            print(f" [INFO] Running in FREE Mode (Machine ID: {mid})")
+            print(" Upgrade to PRO to unlock Networking, Shell, and more.")
             print("==================================================")
-            sys.exit(1)
+            return Tier.FREE
             
         with open("license.key", "r") as f:
             key = f.read().strip()
             
         if not hmac.compare_digest(key, expected):
             print("==================================================")
-            print(" [ERROR] INVALID LICENSE")
-            print(" This software is pirated or corrupted.")
-            print(" Execution Refused.")
+            print(" [WARN] Invalid License Key. Reverting to FREE Mode.")
             print("==================================================")
-            sys.exit(1)
+            return Tier.FREE
             
-        print("[SYSTEM] License Verified. Starting Engine...")
+        print("==================================================")
+        print(" [SYSTEM] PRO LICENSE VERIFIED.")
+        print(" Unlocked: Networking, Shell, FFI, Persistence.")
+        print("==================================================")
+        return Tier.PRO

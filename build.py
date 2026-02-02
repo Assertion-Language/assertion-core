@@ -28,9 +28,18 @@ def build_dist():
                 os.remove(os.path.join(root, file))
                 print(f"    Removed {file}")
     
-    print("[BUILD] Obfuscation Complete.")
-    print("        Distribution available in 'dist/'.")
-    print("        Run with: python3 dist/engine/cli/repl.pyc (Wait, need entry point wrapper?)")
+
+    # Encrypt
+    print("[BUILD] Encrypting (THE VAULT)...")
+    from engine.security.encryptor import VaultBuilder
+    VaultBuilder().build("dist/engine")
+    
+    # Copy Bootloader
+    shutil.copy("boot.py", "dist/boot.py")
+    
+    print("[BUILD] Vault Locked.")
+    print("        Run with: python3 dist/boot.py")
 
 if __name__ == "__main__":
     build_dist()
+
