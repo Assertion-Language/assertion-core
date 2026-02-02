@@ -13,7 +13,7 @@ from engine.parser.ast_nodes import (
     Program, Trigger,
     SetStmt, OutputStmt, RepeatStmt, IfStmt,
     CreateFileStmt, WriteFileStmt,
-    Literal, Identifier, Stmt
+    Literal, Identifier, Stmt, VarDecl
 )
 
 
@@ -31,6 +31,10 @@ class Parser:
             tok = self.peek()
             if tok.type == "WHEN":
                 prog.triggers.append(self.parse_trigger())
+            # Handle "THERE IS A" context definition
+            elif tok.type == "IDENT" and tok.value.upper() == "THERE":
+                 prog.globals.append(self.parse_context())
+            # Handle "CREATE A" or matches for variable dec if start with mapped IDENT
             else:
                 self.advance()  # skip irrelevant tokens at top-level
 
@@ -43,6 +47,11 @@ class Parser:
     def parse_trigger(self) -> Trigger:
         when = self.expect("WHEN")
         name_tok = self.expect("IDENT")
+        
+        # Optional colon
+        if self.peek().type == "SYMBOL" and self.peek().value == ":":
+            self.advance()
+
         trig = Trigger(name=name_tok.value, line=when.line, block=[])
 
         # skip to next line / indent collected in statements
@@ -56,7 +65,40 @@ class Parser:
                 break
             body.append(self.parse_statement())
         trig.block = body
+        trig.block = body
         return trig
+
+    # ----------------------------------------------------------
+    # Context (Variables)
+    # ----------------------------------------------------------
+
+    def parse_context(self) -> VarDecl:
+        # Expect "THERE" (already checked in peek)
+        self.advance() # Skip THERE
+        self.expect("IS")
+        # A/AN are noise words, so we skip directly to TYPE
+        
+        # TYPE
+        type_tok = self.expect_any(["IDENT", "STRING"])
+        type_str = type_tok.value
+
+        self.expect_any(["CALLED", "NAMED", "IDENT"]) # "called"
+        
+        # NAME
+        name_tok = self.expect("STRING")
+        name = name_tok.value.strip('"')
+
+        # VALUE (optional "WITH VALUE")
+        val = None
+        if self.match("WITH"):
+            self.match("VALUE") 
+            val_tok = self.expect_any(["STRING", "NUMBER"])
+            if val_tok.type == "NUMBER":
+                val = float(val_tok.value) if '.' in val_tok.value else int(val_tok.value)
+            else:
+                val = val_tok.value.strip('"')
+        
+        return VarDecl(line=type_tok.line, name=name, type=type_str, value=val)
 
     # ----------------------------------------------------------
     # Statement dispatcher
@@ -96,7 +138,9 @@ class Parser:
         kw = self.expect("SET")
         target = self.expect("STRING").value.strip('"')
 
-        self.expect("TO")
+        # Optional "TO"
+        self.match("TO")
+        
         left_tok = self.expect_any(["IDENT", "STRING", "NUMBER"])
         left = self.wrap_literal(left_tok)
 

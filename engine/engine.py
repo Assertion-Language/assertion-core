@@ -7,6 +7,8 @@ from pathlib import Path
 from engine.lexer.tokenizer import tokenize
 from engine.parser.parser import Parser
 from engine.parser.semantic import SemanticAnalyzer
+from engine.parser.fuzzy_parser import FuzzyParser
+from engine.runtime.interpreter import Interpreter
 from engine.crypto.manifest_crypto import verify_manifest_signature
 
 class Engine:
@@ -28,11 +30,18 @@ class Engine:
         if not verify_manifest_signature(text):
             raise ValueError("Manifest signature invalid or missing")
 
-        tokens = tokenize(text)
-        parser = Parser()
-        self.ast = parser.parse(tokens)
+        # Conversational / Fuzzy Parser
+        # We now use the FuzzyParser which handles sentence splitting and NLP
+        print(f"[Engine] Loading conversational manifest: {path}")
+        parser = FuzzyParser()
+        self.ast = parser.parse(text)
+        
+        # Legacy Strict Mode
+        # tokens = tokenize(text)
+        # parser = Parser()
+        # self.ast = parser.parse(tokens)
 
-        SemanticAnalyzer().analyze(self.ast)
+        # SemanticAnalyzer().analyze(self.ast)
 
     def compile(self):
         """
@@ -45,13 +54,14 @@ class Engine:
 
     def run(self):
         """
-        Later phases:
-        - Bytecode execution
-        - JIT execution
-        - Fiber scheduler
-        - Distributed mode
+        Execute the AST using the Interpreter.
         """
-        pass
+        if not self.ast:
+            print("No AST loaded. Call load_manifest() first.")
+            return
+
+        interp = Interpreter()
+        interp.run(self.ast)
 
 
 def main():

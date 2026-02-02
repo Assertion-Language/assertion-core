@@ -33,7 +33,37 @@ KEYWORDS = {
     "WHEN", "SET", "OUTPUT", "IF", "IS",
     "PLUS", "MINUS", "TIMES",
     "REPEAT", "TIMES",
-    "CREATE", "WRITE", "TO", "FILE"
+    "CREATE", "WRITE", "TO", "FILE",
+    "CALLED", "NAMED", "WITH", "VALUE"
+}
+
+SYNONYMS = {
+    # SET
+    "MAKE": "SET",
+    "LET": "SET",
+    "DEFINE": "SET",
+    "ASSIGN": "SET",
+
+    # OUTPUT
+    "PRINT": "OUTPUT",
+    "SAY": "OUTPUT",
+    "WHISPER": "OUTPUT",
+    "SHOUT": "OUTPUT",
+    "DISPLAY": "OUTPUT",
+
+    # REPEAT
+    "LOOP": "REPEAT",
+    "ITERATE": "REPEAT",
+
+    # IS
+    "EQUALS": "IS",
+    "BE": "IS"
+}
+
+NOISE_WORDS = {
+    "THE", "A", "AN",
+    "PLEASE", "KINDLY", "NOW", "THEN",
+    "DO", "IT", "AGAIN"
 }
 
 # Regex patterns
@@ -101,8 +131,18 @@ def tokenize(text: str) -> List[Token]:
             if m:
                 lex = m.group(0)
                 upper = lex.upper()
+
+                if upper in NOISE_WORDS:
+                    # Skip noise words entirely
+                    i = m.end()
+                    continue
+
                 if upper in KEYWORDS:
                     tokens.append(Token(upper, lex, indent, line_no))
+                elif upper in SYNONYMS:
+                    # Map synonym to canonical keyword
+                    canonical = SYNONYMS[upper]
+                    tokens.append(Token(canonical, lex, indent, line_no))
                 else:
                     tokens.append(Token("IDENT", lex, indent, line_no))
                 i = m.end()
